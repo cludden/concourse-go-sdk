@@ -1,0 +1,46 @@
+# This is an example .goreleaser.yml file with some sensible defaults.
+# Make sure to check the documentation at https://goreleaser.com
+project_name: concourse-example-resource
+before:
+  hooks:
+    # You may remove this if you don't use go modules.
+    - go mod tidy
+builds:
+  - id: check
+    binary: check
+    env: [CGO_ENABLED=0]
+    goarch: [amd64]
+    goos: [linux]
+    ldflags:
+      - -X github.com/cludden/concourse-go-sdk.Operation=check
+  - id: in
+    binary: in
+    env: [CGO_ENABLED=0]
+    goarch: [amd64]
+    goos: [linux]
+    ldflags:
+      - -X github.com/cludden/concourse-go-sdk.Operation=in
+  - id: out
+    binary: out
+    env: [CGO_ENABLED=0]
+    goarch: [amd64]
+    goos: [linux]
+    ldflags:
+      - -X github.com/cludden/concourse-go-sdk.Operation=out
+archives:
+  - files: [none*]
+checksum:
+  name_template: "checksums.txt"
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+dockers:
+  - image_templates:
+      - "concourse-example-resource:latest"
+      - "concourse-example-resource:{{ .Tag }}"
+      - "concourse-example-resource:{{ .FullCommit }}"
