@@ -2,12 +2,14 @@ package sdk
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 
 	validation "github.com/go-ozzo/ozzo-validation"
 	"github.com/go-ozzo/ozzo-validation/is"
 	"github.com/stretchr/testify/assert"
+	"github.com/tidwall/gjson"
 )
 
 type (
@@ -42,11 +44,9 @@ func (p *testPutParams) Validate(context.Context) error {
 }
 
 func TestInitialize(t *testing.T) {
-	source := []byte(`{"addr":"localhost:8080"}`)
-
 	cases := map[string]struct {
 		method  interface{}
-		message *Message
+		message []byte
 		errors  []string
 	}{
 		"ok": {},
@@ -96,9 +96,7 @@ func TestInitialize(t *testing.T) {
 			dir := t.TempDir()
 			msg := c.message
 			if msg == nil {
-				msg = &Message{
-					Source: source,
-				}
+				msg = []byte(`{"source":{"addr":"localhost:8080"}}`)
 			}
 			method := c.method
 			if method == nil {
@@ -108,7 +106,7 @@ func TestInitialize(t *testing.T) {
 					return nil
 				}
 			}
-			result, err := initAction.Exec(context.Background(), dir, reflect.ValueOf(method), msg)
+			result, err := initAction.Exec(context.Background(), dir, reflect.ValueOf(method), gjson.ParseBytes(msg))
 			if len(c.errors) > 0 {
 				if assert.Error(t, err) {
 					for _, desc := range c.errors {
@@ -130,14 +128,15 @@ func TestCheck(t *testing.T) {
 
 	cases := map[string]struct {
 		method  interface{}
-		message *Message
+		message []byte
 		errors  []string
 	}{
 		"ok": {},
 		"ok_no_version": {
-			message: &Message{
-				Source: source,
-			},
+			message: []byte(fmt.Sprintf(`{"source":%s}`, source)),
+		},
+		"ok_null_version": {
+			message: []byte(fmt.Sprintf(`{"source":%s,"version":null}`, source)),
 		},
 		"bad_signature_too_few_args": {
 			errors: []string{"expected method to require 3 arguments, got 2"},
@@ -191,37 +190,25 @@ func TestCheck(t *testing.T) {
 			},
 		},
 		"invalid_args_source_empty": {
-			message: &Message{
-				Source:  []byte(`{"addr":""}`),
-				Version: version,
-			},
+			message: []byte(fmt.Sprintf(`{"source":{"addr":""},"version":%s}`, version)),
 			errors: []string{
 				"error parsing source argument: invalid input: addr: cannot be blank",
 			},
 		},
 		"invalid_args_source_invalid": {
-			message: &Message{
-				Source:  []byte(`{"addr":":)"}`),
-				Version: version,
-			},
+			message: []byte(fmt.Sprintf(`{"source":{"addr":":)"},"version":%s}`, version)),
 			errors: []string{
 				"error parsing source argument: invalid input: addr: must be a valid URL",
 			},
 		},
 		"invalid_args_version_empty": {
-			message: &Message{
-				Source:  source,
-				Version: []byte(`{}`),
-			},
+			message: []byte(fmt.Sprintf(`{"source":%s,"version":{}}`, source)),
 			errors: []string{
 				"error parsing version argument: invalid input: id: cannot be blank",
 			},
 		},
 		"invalid_args_version_invalid": {
-			message: &Message{
-				Source:  source,
-				Version: []byte(`{"id":"foo"}`),
-			},
+			message: []byte(fmt.Sprintf(`{"source":%s,"version":{"id":"foo"}}`, source)),
 			errors: []string{
 				"error parsing version argument: invalid input: id: must contain unicode decimal digits only",
 			},
@@ -232,11 +219,7 @@ func TestCheck(t *testing.T) {
 		t.Run(alias, func(t *testing.T) {
 			msg := c.message
 			if msg == nil {
-				msg = &Message{
-					Source:  source,
-					Version: version,
-					Params:  params,
-				}
+				msg = []byte(fmt.Sprintf(`{"source":%s,"version":%s,"params":%s}`, source, version, params))
 			}
 			method := c.method
 			if method == nil {
@@ -250,10 +233,12 @@ func TestCheck(t *testing.T) {
 					return []testVersion{}, nil
 				}
 			}
-			result, err := checkAction.Exec(context.Background(), "", reflect.ValueOf(method), msg)
+			result, err := checkAction.Exec(context.Background(), "", reflect.ValueOf(method), gjson.ParseBytes(msg))
 			if len(c.errors) > 0 {
-				for _, desc := range c.errors {
-					assert.Contains(t, err.Error(), desc)
+				if assert.Error(t, err) {
+					for _, desc := range c.errors {
+						assert.Contains(t, err.Error(), desc)
+					}
 				}
 			} else {
 				if assert.NoError(t, err) {
@@ -271,15 +256,15 @@ func TestIn(t *testing.T) {
 
 	cases := map[string]struct {
 		method  interface{}
-		message *Message
+		message []byte
 		errors  []string
 	}{
 		"ok": {},
 		"ok_no_params": {
-			message: &Message{
-				Source:  source,
-				Version: version,
-			},
+			message: []byte(fmt.Sprintf(`{"source":%s,"version":%s}`, source, version)),
+		},
+		"ok_null_params": {
+			message: []byte(fmt.Sprintf(`{"source":%s,"version":%s,"params":null}`, source, version)),
 		},
 		"bad_signature_too_few_args": {
 			errors: []string{"expected method to require 5 arguments, got 2"},
@@ -328,24 +313,19 @@ func TestIn(t *testing.T) {
 			},
 		},
 		"invalid_args_params_empty": {
-			message: &Message{
-				Source:  source,
-				Version: version,
-				Params:  []byte(`{"color":""}`),
-			},
+			message: []byte(fmt.Sprintf(`{"source":%s,"version":%s,"params":{"color":""}}`, source, version)),
 			errors: []string{
 				"error parsing params argument: invalid input: color: cannot be blank",
 			},
 		},
 		"invalid_args_params_invalid": {
-			message: &Message{
-				Source:  source,
-				Version: version,
-				Params:  []byte(`{"color":"red"}`),
-			},
+			message: []byte(fmt.Sprintf(`{"source":%s,"version":%s,"params":{"color":"red"}}`, source, version)),
 			errors: []string{
 				"error parsing params argument: invalid input: color: must be a valid value",
 			},
+		},
+		"empty_source_and_params": {
+			message: []byte(fmt.Sprintf(`{"source":null,"version":%s,"params":null}`, version)),
 		},
 	}
 
@@ -354,17 +334,14 @@ func TestIn(t *testing.T) {
 			dir := t.TempDir()
 			msg := c.message
 			if msg == nil {
-				msg = &Message{
-					Source:  source,
-					Version: version,
-					Params:  params,
-				}
+				msg = []byte(fmt.Sprintf(`{"source":%s,"version":%s,"params":%s}`, source, version, params))
 			}
 			method := c.method
 			if method == nil {
 				method = func(ctx context.Context, src *testSource, v *testVersion, path string, params *testGetParams) (*testVersion, []Metadata, error) {
-					assert.NotNil(t, src, "source cannot be nil")
-					assert.Equal(t, src.Addr, "localhost:8080")
+					if src != nil {
+						assert.Equal(t, src.Addr, "localhost:8080")
+					}
 					assert.NotNil(t, v, "version cannot be nil")
 					assert.Equal(t, v.ID, "123456")
 					assert.Equal(t, dir, path)
@@ -374,7 +351,7 @@ func TestIn(t *testing.T) {
 					return v, []Metadata{{Name: "foo", Value: "bar"}}, nil
 				}
 			}
-			result, err := inAction.Exec(context.Background(), dir, reflect.ValueOf(method), msg)
+			result, err := inAction.Exec(context.Background(), dir, reflect.ValueOf(method), gjson.ParseBytes(msg))
 			if len(c.errors) > 0 {
 				if assert.Error(t, err) {
 					for _, desc := range c.errors {
@@ -391,19 +368,19 @@ func TestIn(t *testing.T) {
 
 func TestOut(t *testing.T) {
 	source := []byte(`{"addr":"localhost:8080"}`)
-	version := []byte(`{"id":"123456"}`)
 	params := []byte(`{"color":"blue","size":7}`)
 
 	cases := map[string]struct {
 		method  interface{}
-		message *Message
+		message []byte
 		errors  []string
 	}{
 		"ok": {},
 		"ok_no_params": {
-			message: &Message{
-				Source: source,
-			},
+			message: []byte(fmt.Sprintf(`{"source":%s}`, source)),
+		},
+		"ok_null_params": {
+			message: []byte(fmt.Sprintf(`{"source":%s,"params":null}`, source)),
 		},
 		"bad_signature_too_few_args": {
 			errors: []string{"expected method to require 4 arguments, got 2"},
@@ -451,21 +428,13 @@ func TestOut(t *testing.T) {
 			},
 		},
 		"invalid_args_params_empty": {
-			message: &Message{
-				Source:  source,
-				Version: version,
-				Params:  []byte(`{}`),
-			},
+			message: []byte(fmt.Sprintf(`{"source":%s,"params":{}}`, source)),
 			errors: []string{
 				"error parsing params argument: invalid input: size: cannot be blank",
 			},
 		},
 		"invalid_args_params_invalid": {
-			message: &Message{
-				Source:  source,
-				Version: version,
-				Params:  []byte(`{"size":100}`),
-			},
+			message: []byte(fmt.Sprintf(`{"source":%s,"params":{"size":100}}`, source)),
 			errors: []string{
 				"error parsing params argument: invalid input: size: must be no greater than 10",
 			},
@@ -477,10 +446,7 @@ func TestOut(t *testing.T) {
 			dir := t.TempDir()
 			msg := c.message
 			if msg == nil {
-				msg = &Message{
-					Source: source,
-					Params: params,
-				}
+				msg = []byte(fmt.Sprintf(`{"source":%s,"params":%s}`, source, params))
 			}
 			method := c.method
 			if method == nil {
@@ -494,7 +460,7 @@ func TestOut(t *testing.T) {
 					return &testVersion{ID: "123456"}, []Metadata{{Name: "foo", Value: "bar"}}, nil
 				}
 			}
-			result, err := outAction.Exec(context.Background(), dir, reflect.ValueOf(method), msg)
+			result, err := outAction.Exec(context.Background(), dir, reflect.ValueOf(method), gjson.ParseBytes(msg))
 			if len(c.errors) > 0 {
 				if assert.Error(t, err) {
 					for _, desc := range c.errors {

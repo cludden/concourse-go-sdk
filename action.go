@@ -8,6 +8,7 @@ import (
 	"reflect"
 
 	"github.com/hashicorp/go-multierror"
+	"github.com/tidwall/gjson"
 )
 
 // argument enum describing the supported concourse action input values
@@ -96,7 +97,7 @@ var (
 )
 
 // Exec parses, validates, and executes an action
-func (a *action) Exec(ctx context.Context, path string, method reflect.Value, req *Message) (resp interface{}, err error) {
+func (a *action) Exec(ctx context.Context, path string, method reflect.Value, req gjson.Result) (resp interface{}, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic: %v", r)
@@ -123,7 +124,7 @@ func (a *action) Exec(ctx context.Context, path string, method reflect.Value, re
 				errs = multierror.Append(errs, fmt.Errorf("argument %d must be pointer to source struct, got %s", i, at))
 				break
 			}
-			args, err = validateArg(args, ctx, at, req.Source, true)
+			args, err = validateArg(args, ctx, at, req.Get("source"), false)
 			if err != nil {
 				errs = multierror.Append(errs, fmt.Errorf("error parsing source argument: %v", err))
 			}
@@ -138,7 +139,7 @@ func (a *action) Exec(ctx context.Context, path string, method reflect.Value, re
 				errs = multierror.Append(errs, fmt.Errorf("argument %d must be pointer to version struct, got %s", i, at))
 				break
 			}
-			args, err = validateArg(args, ctx, at, req.Version, i != len(a.arguments)-1)
+			args, err = validateArg(args, ctx, at, req.Get("version"), i != len(a.arguments)-1)
 			if err != nil {
 				errs = multierror.Append(errs, fmt.Errorf("error parsing version argument: %v", err))
 			}
@@ -146,7 +147,7 @@ func (a *action) Exec(ctx context.Context, path string, method reflect.Value, re
 			if at.Kind() != reflect.Ptr || at.Elem().Kind() != reflect.Struct {
 				errs = multierror.Append(errs, fmt.Errorf("argument %d must be pointer to params struct, got %s", i, at))
 			}
-			args, err = validateArg(args, ctx, at, req.Params, i != len(a.arguments)-1)
+			args, err = validateArg(args, ctx, at, req.Get("params"), false)
 			if err != nil {
 				errs = multierror.Append(errs, fmt.Errorf("error parsing params argument: %v", err))
 			}
@@ -250,18 +251,18 @@ func validate(ctx context.Context, ptr reflect.Value) error {
 
 // validateArg initializes a new value of the specified type, unmarshals the
 // raw payload, and performs optional validation if implemented by the consumer
-func validateArg(args []reflect.Value, ctx context.Context, t reflect.Type, raw json.RawMessage, required bool) ([]reflect.Value, error) {
-	if required && len(raw) == 0 {
+func validateArg(args []reflect.Value, ctx context.Context, t reflect.Type, v gjson.Result, required bool) ([]reflect.Value, error) {
+	if required && v.Type == gjson.Null {
 		return args, fmt.Errorf("missing required input")
 	}
 	arg := reflect.New(t)
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, arg.Interface()); err != nil {
+	if v.IsObject() {
+		if err := json.Unmarshal([]byte(v.Raw), arg.Interface()); err != nil {
 			return nil, fmt.Errorf("error unmarshalling input: %v", err)
 		}
-		if err := validate(ctx, arg); err != nil {
-			return nil, fmt.Errorf("invalid input: %v", err)
-		}
+	}
+	if err := validate(ctx, arg); err != nil {
+		return nil, fmt.Errorf("invalid input: %v", err)
 	}
 	return append(args, arg.Elem()), nil
 }
