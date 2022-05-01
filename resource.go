@@ -11,6 +11,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/oklog/run"
+	"github.com/tidwall/gjson"
 )
 
 var (
@@ -22,9 +23,9 @@ var (
 type (
 	// Message describes an input payload to a resource operation
 	Message struct {
-		Params  json.RawMessage `json:"params"`
-		Source  json.RawMessage `json:"source"`
-		Version json.RawMessage `json:"version"`
+		Params  json.RawMessage `json:"params,omitempty"`
+		Source  json.RawMessage `json:"source,omitempty"`
+		Version json.RawMessage `json:"version,omitempty"`
 	}
 
 	// Metadata describes a key value pair associated with a resource version
@@ -125,10 +126,16 @@ func Exec(ctx context.Context, op operation, resource interface{}, stdin io.Read
 		return fmt.Errorf("unsupported op: %v", op)
 	}
 
-	var req Message
-	if err := json.NewDecoder(stdin).Decode(&req); err != nil {
-		return fmt.Errorf("invalid operation: error reading message: %v", err)
+	payload, err := io.ReadAll(stdin)
+	if err != nil {
+		return fmt.Errorf("error reading input: %v", err)
 	}
+
+	if !gjson.ValidBytes(payload) {
+		return fmt.Errorf("error reading input: invalid json")
+	}
+
+	req := gjson.ParseBytes(payload)
 
 	method := pv.MethodByName(act.method)
 	if !method.IsValid() {
@@ -136,12 +143,12 @@ func Exec(ctx context.Context, op operation, resource interface{}, stdin io.Read
 	}
 
 	if init := pv.MethodByName("Initialize"); init.IsValid() {
-		if _, err := initAction.Exec(ctx, "", init, &req); err != nil {
+		if _, err := initAction.Exec(ctx, "", init, req); err != nil {
 			return fmt.Errorf("error initializing resource: %v", err)
 		}
 	}
 
-	result, err := act.Exec(ctx, path, method, &req)
+	result, err := act.Exec(ctx, path, method, req)
 	if err != nil {
 		return fmt.Errorf("error executing %s: %v", act.method, err)
 	}
