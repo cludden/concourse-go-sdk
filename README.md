@@ -14,6 +14,8 @@ a minimal SDK for implementing an idiomatic [Concourse](https://concourse-ci.org
 package main
 
 import (
+    "errors"
+
     concourse "github.com/cludden/concourse-go-sdk"
 )
 
@@ -31,13 +33,21 @@ type (
 // 2. Define resource type and corresponding methods
 type Resource struct {}
 
-func (r *Resource) Initialize(context.Context, *Source) error {}
+func (r *Resource) Initialize(context.Context, *Source) error {
+    return errors.New("not implemented")
+}
 
-func (r *Resource) Check(context.Context, *Source, *Version) ([]Version, error) {}
+func (r *Resource) Check(context.Context, *Source, *Version) ([]Version, error) {
+    return nil, return errors.New("not implemented")
+}
 
-func (r *Resource) In(context.Context, *Source, *Version, string, *GetParams) (*Version, []concourse.Metadata, error) {}
+func (r *Resource) In(context.Context, *Source, *Version, string, *GetParams) ([]concourse.Metadata, error) {
+    return nil, return errors.New("not implemented")
+}
 
-func (r *Resource) Out(context.Context, *Source, string, *PutParams) (*Version, []concourse.Metadata, error) {}
+func (r *Resource) Out(context.Context, *Source, string, *PutParams) (*Version, []concourse.Metadata, error) {
+    return nil, nil, return errors.New("not implemented")
+}
 
 // 3. Invoke the Main function provided by this sdk
 func main() {
@@ -55,16 +65,12 @@ an arbitrary JSON object which specifies the runtime configuration of the resour
 ```go
 // Source describes the available configuration for a git resource
 type Source struct {
-    URI           string   `json:"uri" validate:"required,uri"`
+    URI           string   `json:"uri"`
     Branch        string   `json:"branch"`
-    PrivateKey    string   `json:"private_key" validate:"file"`
-    Paths         []string `json:"paths" validate:"file"`
-    IgnorePaths   []string `json:"ignore_paths" validate:"file"`
+    PrivateKey    string   `json:"private_key"`
+    Paths         []string `json:"paths"`
+    IgnorePaths   []string `json:"ignore_paths"`
     DisableCISkip bool     `json:"disable_ci_skip"`
-}
-
-func (s *Source) Validate(ctx context.Context) error {
-    return validator.New().StructContext(ctx, s)
 }
 ```
 
@@ -75,11 +81,7 @@ a JSON object with string fields, used to uniquely identify an instance of the r
 ```go
 // Version describes the attributes that uniquely identify a git resource version
 type Version struct {
-    Ref string `json:"ref" validate:"required,hexadecimal,len=6"`
-}
-
-func (v *Version) Validate(ctx context.Context) error {
-    return validator.New().StructContext(ctx, v)
+    Ref string `json:"ref"`
 }
 ```
 
@@ -90,13 +92,9 @@ an arbitrary JSON object passed along verbatim from [get step params](https://co
 ```go
 // GetParams describes the available parameters for a git resource get step
 type GetParams struct {
-    Depth      int      `json:"depth" validate:"min=0,max=127"`
+    Depth      int      `json:"depth"`
     FetchTags  bool     `json:"fetch_tags"`
     Submodules []string `json:"submodules"`
-}
-
-func (p *GetParams) Validate(ctx context.Context) error {
-    return validator.New().StructContext(ctx, p)
 }
 ```
 
@@ -107,15 +105,11 @@ an arbitrary JSON object passed along verbatim from [put step params](https://co
 ```go
 // PutParams describes the available parameters for a git resource put step
 type PutParams struct {
-    Repository string `json:"repository" validate:"required,file"`
+    Repository string `json:"repository"`
     Rebase     bool   `json:"rebase"`
     Merge      bool   `json:"merge"`
-    Tag        string `json:"tag" validate:"file"`
+    Tag        string `json:"tag"`
     Force      bool   `json:"force"`
-}
-
-func (p *PutParams) Validate(ctx context.Context) error {
-    return validator.New().StructContext(ctx, p)
 }
 ```
 
@@ -129,14 +123,7 @@ type Validatable interface {
 ```
 
 ## Required Methods
-A resource must implement a [Check](#check), [In](#in), and [Out](#out) method with the correct signature. A resource can optionally implement an [Initialize](#initialize) method which will be invoked anytime a resource container is launched, prior any action method. Note that unlike the [required types](#required-types), the names of these methods *are* important, and the resource will fail if a required method is not implemented.
-
-### `Initialize`
-An *optional* method for performing common initialization logic.
-
-```go
-func (r *Resource) Initialize(context.Context, *Source) error {}
-```
+A resource must implement a [Check](#check), [In](#in), and [Out](#out) method with the correct signature that utilizes one or more [required types](#required-types). Note that unlike the [required types](#required-types), the names of these methods *are* important, and the resource will fail if a required method is not implemented.
 
 ### `Check`
 [Check for new versions](https://concourse-ci.org/implementing-resource-types.html#resource-check)
@@ -149,6 +136,10 @@ func (r *Resource) Check(ctx context.Context, s *Source, v *Version) ([]Version,
 [Fetch a given resource](https://concourse-ci.org/implementing-resource-types.html#resource-in)
 
 ```go
+// Preferred signature
+func (r *Resource) In(ctx context.Context, s *Source, v *Version, dir string, p *GetParams) ([]concourse.Metadata, error) {}
+
+// Deprecated signature, where the version returned value should be equal to the version input value
 func (r *Resource) In(ctx context.Context, s *Source, v *Version, dir string, p *GetParams) (*Version, []concourse.Metadata, error) {}
 ```
 
@@ -158,6 +149,59 @@ func (r *Resource) In(ctx context.Context, s *Source, v *Version, dir string, p 
 ```go
 func (r *Resource) Out(ctx context.Context, s *Source, dir string, p *GetParams) (*Version, []concourse.Metadata, error) {}
 ```
+
+## Optional Methods
+A resource can optionally implement the following methods to opt into additional functionality.
+
+### `Archive`
+An *optional* method that, if implemented, enables resource version [archiving](#archiving). This method should initialize and return a valid archive value.
+
+```go
+func (r *Resource) Archive(ctx context.Context, source interface{}) (archive.Archive, error) {}
+```
+
+### `Initialize`
+An *optional* method for performing common initialization logic. If implemented, this method is invoked anytime a resource container is launched, prior to any action method.
+
+```go
+func (r *Resource) Initialize(context.Context, *Source) error {}
+```
+
+## Archiving
+In certain situations, Concourse can reset a particular resource's version history (e.g. when the source parameters change). Often times, this is undesirable. This sdk supports archiving resource version history as a workaround. To enable this functionality, a resource should implement an [Archive](#archive) method that initializes and returns a valid archive:
+
+```go
+type Archive interface {
+    // Close should handle any graceful termination steps (e.g. closing open connections or file handles, persisting local data to a remote store, etc)
+	Close(ctx context.Context) error
+    // History returns an ordered list of json serialized versions
+	History(ctx context.Context) ([][]byte, error)
+    // Put appends an ordered list of versions to a resource's history, making sure to avoid duplicates
+	Put(ctx context.Context, versions ...[]byte) error
+}
+```
+
+This sdk also provides the following out-of-the-box archive implementations that can be utilized via:
+
+```go
+import (
+    "github.com/cludden/concourse-go-sdk/pkg/archive"
+)
+
+type Source struct {
+    Archive *archive.Config `json:"archive"`
+}
+
+func (r *Resource) Archive(ctx context.Context, source *Source) (archive.Archive, error) {
+    if s != nil && s.Archive != nil {
+        return archive.New(ctx, *s.Archive)
+    }
+    return nil, nil
+}
+```
+
+### `boltdb`
+an archive implementation that utilizes [boltdb] backed by [AWS S3].
 
 ## License
 Licensed under the [MIT License](LICENSE.md)  

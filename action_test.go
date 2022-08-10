@@ -6,41 +6,56 @@ import (
 	"reflect"
 	"testing"
 
-	validation "github.com/go-ozzo/ozzo-validation"
-	"github.com/go-ozzo/ozzo-validation/is"
+	"github.com/cludden/concourse-go-sdk/mocks"
+	"github.com/cludden/concourse-go-sdk/pkg/archive"
+	"github.com/cludden/concourse-go-sdk/pkg/archive/inmem"
+	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/tidwall/gjson"
 )
 
 type (
 	testSource struct {
-		Addr string `json:"addr"`
+		Addr string `json:"addr" validate:"required,url"`
 	}
 	testVersion struct {
-		ID string `json:"id"`
+		ID string `json:"id" validate:"required,numeric"`
 	}
 	testGetParams struct {
-		Color string `json:"color"`
+		Color string `json:"color" validate:"required,oneof=blue green"`
 	}
 	testPutParams struct {
-		Size int `json:"size"`
+		Size int `json:"size" validate:"required,min=1,max=10"`
 	}
 )
 
-func (s *testSource) Validate(context.Context) error {
-	return validation.ValidateStruct(s, validation.Field(&s.Addr, validation.Required, is.URL))
+func (s *testSource) Validate(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	return validator.New().StructCtx(ctx, s)
 }
 
-func (v *testVersion) Validate(context.Context) error {
-	return validation.ValidateStruct(v, validation.Field(&v.ID, validation.Required, is.UTFDigit))
+func (v *testVersion) Validate(ctx context.Context) error {
+	if v == nil {
+		return nil
+	}
+	return validator.New().StructCtx(ctx, v)
 }
 
-func (p *testGetParams) Validate(context.Context) error {
-	return validation.ValidateStruct(p, validation.Field(&p.Color, validation.Required, validation.In("blue", "green")))
+func (p *testGetParams) Validate(ctx context.Context) error {
+	if p == nil {
+		return nil
+	}
+	return validator.New().StructCtx(ctx, p)
 }
 
-func (p *testPutParams) Validate(context.Context) error {
-	return validation.ValidateStruct(p, validation.Field(&p.Size, validation.Required, validation.Min(1), validation.Max(10)))
+func (p *testPutParams) Validate(ctx context.Context) error {
+	if p == nil {
+		return nil
+	}
+	return validator.New().StructCtx(ctx, p)
 }
 
 func TestInitialize(t *testing.T) {
@@ -106,7 +121,7 @@ func TestInitialize(t *testing.T) {
 					return nil
 				}
 			}
-			result, err := initAction.Exec(context.Background(), dir, reflect.ValueOf(method), gjson.ParseBytes(msg))
+			result, err := initAction.exec(context.Background(), dir, reflect.ValueOf(method), gjson.ParseBytes(msg), nil)
 			if len(c.errors) > 0 {
 				if assert.Error(t, err) {
 					for _, desc := range c.errors {
@@ -128,10 +143,20 @@ func TestCheck(t *testing.T) {
 
 	cases := map[string]struct {
 		method  interface{}
+		archive func(t *testing.T) archive.Archive
 		message []byte
 		errors  []string
+		assert  func(t *testing.T, a archive.Archive, result any)
 	}{
-		"ok": {},
+		"ok": {
+			method: func(ctx context.Context, src *testSource, v *testVersion) ([]testVersion, error) {
+				assert.NotNil(t, src)
+				assert.Equal(t, src.Addr, "localhost:8080")
+				assert.NotNil(t, v, "expected version to not be nil")
+				assert.Equal(t, v.ID, "123456")
+				return []testVersion{}, nil
+			},
+		},
 		"ok_no_version": {
 			message: []byte(fmt.Sprintf(`{"source":%s}`, source)),
 		},
@@ -192,25 +217,170 @@ func TestCheck(t *testing.T) {
 		"invalid_args_source_empty": {
 			message: []byte(fmt.Sprintf(`{"source":{"addr":""},"version":%s}`, version)),
 			errors: []string{
-				"error parsing source argument: invalid input: addr: cannot be blank",
+				"required",
 			},
 		},
 		"invalid_args_source_invalid": {
 			message: []byte(fmt.Sprintf(`{"source":{"addr":":)"},"version":%s}`, version)),
 			errors: []string{
-				"error parsing source argument: invalid input: addr: must be a valid URL",
+				"url",
 			},
 		},
 		"invalid_args_version_empty": {
 			message: []byte(fmt.Sprintf(`{"source":%s,"version":{}}`, source)),
 			errors: []string{
-				"error parsing version argument: invalid input: id: cannot be blank",
+				"required",
 			},
 		},
 		"invalid_args_version_invalid": {
 			message: []byte(fmt.Sprintf(`{"source":%s,"version":{"id":"foo"}}`, source)),
 			errors: []string{
-				"error parsing version argument: invalid input: id: must contain unicode decimal digits only",
+				"numeric",
+			},
+		},
+		"ok_archive_no_history_single_version_emitted": {
+			message: []byte(fmt.Sprintf(`{"source":%s}`, source)),
+			archive: func(t *testing.T) archive.Archive {
+				a, _ := archive.New(context.Background(), archive.Config{Inmem: &inmem.Config{}})
+				return a
+			},
+			method: func(ctx context.Context, src *testSource, v *testVersion) ([]testVersion, error) {
+				assert.NotNil(t, src)
+				assert.Equal(t, src.Addr, "localhost:8080")
+				assert.Nil(t, v)
+				return []testVersion{{ID: "abcdef"}}, nil
+			},
+			assert: func(t *testing.T, a archive.Archive, result any) {
+				history, err := a.History(context.Background())
+				assert.NoError(t, err)
+				assert.Len(t, history, 1)
+				assert.Equal(t, "abcdef", gjson.ParseBytes(history[0]).Get("id").String())
+			},
+		},
+		"ok_archive_no_history_multiple_versions_emitted": {
+			message: []byte(fmt.Sprintf(`{"source":%s}`, source)),
+			archive: func(t *testing.T) archive.Archive {
+				a, _ := archive.New(context.Background(), archive.Config{Inmem: &inmem.Config{}})
+				return a
+			},
+			method: func(ctx context.Context, src *testSource, v *testVersion) ([]testVersion, error) {
+				assert.NotNil(t, src)
+				assert.Equal(t, src.Addr, "localhost:8080")
+				assert.Nil(t, v)
+				return []testVersion{{ID: "1"}, {ID: "2"}, {ID: "3"}}, nil
+			},
+			assert: func(t *testing.T, a archive.Archive, result any) {
+				versions := reflect.ValueOf(result)
+				assert.Equal(t, 3, versions.Len())
+				assert.Equal(t, "1", versions.Index(0).Interface().(testVersion).ID)
+				assert.Equal(t, "2", versions.Index(1).Interface().(testVersion).ID)
+				assert.Equal(t, "3", versions.Index(2).Interface().(testVersion).ID)
+
+				history, err := a.History(context.Background())
+				assert.NoError(t, err)
+				assert.Len(t, history, 3)
+				assert.Equal(t, "1", gjson.ParseBytes(history[0]).Get("id").String())
+				assert.Equal(t, "2", gjson.ParseBytes(history[1]).Get("id").String())
+				assert.Equal(t, "3", gjson.ParseBytes(history[2]).Get("id").String())
+			},
+		},
+		"ok_archive_existing_history_with_source_version": {
+			archive: func(t *testing.T) archive.Archive {
+				m := &mocks.Archive{}
+				matchVersion := func(id string) interface{} {
+					return mock.MatchedBy(func(version []byte) bool {
+						return assert.Equal(t, id, gjson.ParseBytes(version).Get("id").String())
+					})
+				}
+				m.On("Put", mock.Anything, matchVersion("123456"), matchVersion("4")).Return(nil)
+				return m
+			},
+			method: func(ctx context.Context, src *testSource, v *testVersion) ([]testVersion, error) {
+				assert.NotNil(t, src)
+				assert.Equal(t, src.Addr, "localhost:8080")
+				assert.NotNil(t, v)
+				assert.Equal(t, "123456", v.ID)
+				return []testVersion{{ID: "123456"}, {ID: "4"}}, nil
+			},
+			assert: func(t *testing.T, a archive.Archive, result any) {
+				versions := reflect.ValueOf(result)
+				assert.Equal(t, 2, versions.Len())
+				assert.Equal(t, "123456", versions.Index(0).Interface().(testVersion).ID)
+				assert.Equal(t, "4", versions.Index(1).Interface().(testVersion).ID)
+			},
+		},
+		"ok_archive_existing_history_single_version_emitted": {
+			message: []byte(fmt.Sprintf(`{"source":%s}`, source)),
+			archive: func(t *testing.T) archive.Archive {
+				a, _ := archive.New(context.Background(), archive.Config{Inmem: &inmem.Config{
+					History: []string{
+						`{"id":"1"}`,
+						`{"id":"2"}`,
+						`{"id":"3"}`,
+					},
+				}})
+				return a
+			},
+			method: func(ctx context.Context, src *testSource, v *testVersion) ([]testVersion, error) {
+				assert.NotNil(t, src)
+				assert.Equal(t, src.Addr, "localhost:8080")
+				assert.NotNil(t, v)
+				assert.Equal(t, "3", v.ID)
+				return []testVersion{{ID: "3"}, {ID: "4"}}, nil
+			},
+			assert: func(t *testing.T, a archive.Archive, result any) {
+				versions := reflect.ValueOf(result)
+				assert.Equal(t, 4, versions.Len())
+				assert.Equal(t, "1", versions.Index(0).Interface().(testVersion).ID)
+				assert.Equal(t, "2", versions.Index(1).Interface().(testVersion).ID)
+				assert.Equal(t, "3", versions.Index(2).Interface().(testVersion).ID)
+				assert.Equal(t, "4", versions.Index(3).Interface().(testVersion).ID)
+
+				history, err := a.History(context.Background())
+				assert.NoError(t, err)
+				assert.Len(t, history, 4)
+				assert.Equal(t, "1", gjson.ParseBytes(history[0]).Get("id").String())
+				assert.Equal(t, "2", gjson.ParseBytes(history[1]).Get("id").String())
+				assert.Equal(t, "3", gjson.ParseBytes(history[2]).Get("id").String())
+				assert.Equal(t, "4", gjson.ParseBytes(history[3]).Get("id").String())
+			},
+		},
+		"ok_archive_existing_history_multiple_versions_emitted": {
+			message: []byte(fmt.Sprintf(`{"source":%s}`, source)),
+			archive: func(t *testing.T) archive.Archive {
+				a, _ := archive.New(context.Background(), archive.Config{Inmem: &inmem.Config{
+					History: []string{
+						`{"id":"1"}`,
+						`{"id":"2"}`,
+						`{"id":"3"}`,
+					},
+				}})
+				return a
+			},
+			method: func(ctx context.Context, src *testSource, v *testVersion) ([]testVersion, error) {
+				assert.NotNil(t, src)
+				assert.Equal(t, src.Addr, "localhost:8080")
+				assert.NotNil(t, v)
+				assert.Equal(t, "3", v.ID)
+				return []testVersion{{ID: "3"}, {ID: "4"}, {ID: "5"}}, nil
+			},
+			assert: func(t *testing.T, a archive.Archive, result any) {
+				versions := reflect.ValueOf(result)
+				assert.Equal(t, 5, versions.Len())
+				assert.Equal(t, "1", versions.Index(0).Interface().(testVersion).ID)
+				assert.Equal(t, "2", versions.Index(1).Interface().(testVersion).ID)
+				assert.Equal(t, "3", versions.Index(2).Interface().(testVersion).ID)
+				assert.Equal(t, "4", versions.Index(3).Interface().(testVersion).ID)
+				assert.Equal(t, "5", versions.Index(4).Interface().(testVersion).ID)
+
+				history, err := a.History(context.Background())
+				assert.NoError(t, err)
+				assert.Len(t, history, 5)
+				assert.Equal(t, "1", gjson.ParseBytes(history[0]).Get("id").String())
+				assert.Equal(t, "2", gjson.ParseBytes(history[1]).Get("id").String())
+				assert.Equal(t, "3", gjson.ParseBytes(history[2]).Get("id").String())
+				assert.Equal(t, "4", gjson.ParseBytes(history[3]).Get("id").String())
+				assert.Equal(t, "5", gjson.ParseBytes(history[4]).Get("id").String())
 			},
 		},
 	}
@@ -233,7 +403,11 @@ func TestCheck(t *testing.T) {
 					return []testVersion{}, nil
 				}
 			}
-			result, err := checkAction.Exec(context.Background(), "", reflect.ValueOf(method), gjson.ParseBytes(msg))
+			var a archive.Archive
+			if c.archive != nil {
+				a = c.archive(t)
+			}
+			result, err := checkAction.exec(context.Background(), "", reflect.ValueOf(method), gjson.ParseBytes(msg), a)
 			if len(c.errors) > 0 {
 				if assert.Error(t, err) {
 					for _, desc := range c.errors {
@@ -244,6 +418,9 @@ func TestCheck(t *testing.T) {
 				if assert.NoError(t, err) {
 					assert.NotNil(t, result)
 				}
+			}
+			if c.assert != nil {
+				c.assert(t, a, result)
 			}
 		})
 	}
@@ -315,13 +492,13 @@ func TestIn(t *testing.T) {
 		"invalid_args_params_empty": {
 			message: []byte(fmt.Sprintf(`{"source":%s,"version":%s,"params":{"color":""}}`, source, version)),
 			errors: []string{
-				"error parsing params argument: invalid input: color: cannot be blank",
+				"Error:Field validation for 'Color' failed on the 'required' tag",
 			},
 		},
 		"invalid_args_params_invalid": {
 			message: []byte(fmt.Sprintf(`{"source":%s,"version":%s,"params":{"color":"red"}}`, source, version)),
 			errors: []string{
-				"error parsing params argument: invalid input: color: must be a valid value",
+				"Error:Field validation for 'Color' failed on the 'oneof' tag",
 			},
 		},
 		"empty_source_and_params": {
@@ -351,7 +528,7 @@ func TestIn(t *testing.T) {
 					return v, []Metadata{{Name: "foo", Value: "bar"}}, nil
 				}
 			}
-			result, err := inAction.Exec(context.Background(), dir, reflect.ValueOf(method), gjson.ParseBytes(msg))
+			result, err := inAction.exec(context.Background(), dir, reflect.ValueOf(method), gjson.ParseBytes(msg), nil)
 			if len(c.errors) > 0 {
 				if assert.Error(t, err) {
 					for _, desc := range c.errors {
@@ -373,7 +550,9 @@ func TestOut(t *testing.T) {
 	cases := map[string]struct {
 		method  interface{}
 		message []byte
+		archive func(t *testing.T) archive.Archive
 		errors  []string
+		assert  func(t *testing.T, a archive.Archive, result any)
 	}{
 		"ok": {},
 		"ok_no_params": {
@@ -430,13 +609,25 @@ func TestOut(t *testing.T) {
 		"invalid_args_params_empty": {
 			message: []byte(fmt.Sprintf(`{"source":%s,"params":{}}`, source)),
 			errors: []string{
-				"error parsing params argument: invalid input: size: cannot be blank",
+				"Key: 'testPutParams.Size' Error:Field validation for 'Size' failed on the 'required' tag",
 			},
 		},
 		"invalid_args_params_invalid": {
 			message: []byte(fmt.Sprintf(`{"source":%s,"params":{"size":100}}`, source)),
 			errors: []string{
-				"error parsing params argument: invalid input: size: must be no greater than 10",
+				"Key: 'testPutParams.Size' Error:Field validation for 'Size' failed on the 'max' tag",
+			},
+		},
+		"ok_archive": {
+			archive: func(t *testing.T) archive.Archive {
+				a, _ := archive.New(context.Background(), archive.Config{Inmem: &inmem.Config{}})
+				return a
+			},
+			assert: func(t *testing.T, a archive.Archive, result any) {
+				history, err := a.History(context.Background())
+				assert.NoError(t, err)
+				assert.Len(t, history, 1)
+				assert.Equal(t, "123456", gjson.ParseBytes(history[0]).Get("id").String())
 			},
 		},
 	}
@@ -460,7 +651,11 @@ func TestOut(t *testing.T) {
 					return &testVersion{ID: "123456"}, []Metadata{{Name: "foo", Value: "bar"}}, nil
 				}
 			}
-			result, err := outAction.Exec(context.Background(), dir, reflect.ValueOf(method), gjson.ParseBytes(msg))
+			var a archive.Archive
+			if c.archive != nil {
+				a = c.archive(t)
+			}
+			result, err := outAction.exec(context.Background(), dir, reflect.ValueOf(method), gjson.ParseBytes(msg), a)
 			if len(c.errors) > 0 {
 				if assert.Error(t, err) {
 					for _, desc := range c.errors {
@@ -470,6 +665,9 @@ func TestOut(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, result)
+			}
+			if c.assert != nil {
+				c.assert(t, a, result)
 			}
 		})
 	}

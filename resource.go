@@ -21,6 +21,10 @@ var (
 )
 
 type (
+	// Archivable interface {
+	// 	Archive(ctx context.Context, source interface{}) (archive.Archive, error)
+	// }
+
 	// Message describes an input payload to a resource operation
 	Message struct {
 		Params  json.RawMessage `json:"params,omitempty"`
@@ -95,17 +99,21 @@ func Main(resource interface{}) {
 // Exec implements a shared entrypoint for all supported resource operations
 // and handles parsing and validating resource configuration and initializing
 // the resource if implemented
-func Exec(ctx context.Context, op operation, resource interface{}, stdin io.Reader, stdout, stderr io.Writer, args []string) (err error) {
+func Exec(ctx context.Context, op operation, provider any, stdin io.Reader, stdout, stderr io.Writer, args []string) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic: %v", r)
 		}
 	}()
 
+	// blah, configure global color settings
+	color.NoColor = false
+	color.Output = stderr
+
 	ctx = ContextWithStdErr(ctx, stderr)
 
-	pv := reflect.ValueOf(resource)
-	if pv.Kind() != reflect.Ptr || pv.Elem().Kind() != reflect.Struct {
+	resource := reflect.ValueOf(provider)
+	if resource.Kind() != reflect.Ptr || resource.Elem().Kind() != reflect.Struct {
 		return fmt.Errorf("resource provider must be pointer to struct")
 	}
 
@@ -113,15 +121,19 @@ func Exec(ctx context.Context, op operation, resource interface{}, stdin io.Read
 		return fmt.Errorf("invalid operation: path argument required")
 	}
 
-	var act *action
+	var act *Action
 	var path string
 	switch op {
 	case CheckOp:
-		act = checkAction
+		act = Check()
 	case InOp:
-		act, path = inAction, args[1]
+		if resource.MethodByName("In").Type().NumOut() == 2 {
+			act, path = InMetadataOnly(), args[1]
+		} else {
+			act, path = In(), args[1]
+		}
 	case OutOp:
-		act, path = outAction, args[1]
+		act, path = Out(), args[1]
 	default:
 		return fmt.Errorf("unsupported op: %v", op)
 	}
@@ -137,18 +149,13 @@ func Exec(ctx context.Context, op operation, resource interface{}, stdin io.Read
 
 	req := gjson.ParseBytes(payload)
 
-	method := pv.MethodByName(act.method)
-	if !method.IsValid() {
-		return fmt.Errorf("resource is missing required method: %s", act.method)
-	}
-
-	if init := pv.MethodByName("Initialize"); init.IsValid() {
+	if init := resource.MethodByName("Initialize"); init.IsValid() {
 		if _, err := initAction.Exec(ctx, "", init, req); err != nil {
 			return fmt.Errorf("error initializing resource: %v", err)
 		}
 	}
 
-	result, err := act.Exec(ctx, path, method, req)
+	result, err := act.Exec(ctx, path, resource, req)
 	if err != nil {
 		return fmt.Errorf("error executing %s: %v", act.method, err)
 	}
