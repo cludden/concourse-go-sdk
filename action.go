@@ -176,13 +176,14 @@ func (action *Action) Exec(ctx context.Context, path string, resource reflect.Va
 		if err != nil {
 			return nil, fmt.Errorf("error initializing archive: %v", err)
 		}
-		archiver = raw.(archive.Archive)
-
-		defer func() {
-			if err := archiver.Close(ctx); err != nil {
-				color.Red("error closing archive: %v", err)
-			}
-		}()
+		if raw != nil {
+			archiver = raw.(archive.Archive)
+			defer func() {
+				if err := archiver.Close(ctx); err != nil {
+					color.Red("error closing archive: %v", err)
+				}
+			}()
+		}
 	}
 
 	return action.exec(ctx, path, method, req, archiver)
@@ -220,9 +221,12 @@ func (action *Action) exec(ctx context.Context, path string, method reflect.Valu
 
 	switch action.returnValues {
 	case archiveOutput:
+		if results[0].IsNil() {
+			return nil, nil
+		}
 		a, ok := results[0].Interface().(archive.Archive)
 		if !ok {
-			return nil, fmt.Errorf("invalid return type: expected archive.Archive, got %s", results[0].Type().String())
+			return nil, fmt.Errorf("expected return value to be archive.Archive, got: %s", results[0].Type().String())
 		}
 		return a, nil
 	case metadataOnlyOutput:
