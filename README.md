@@ -38,15 +38,15 @@ func (r *Resource) Initialize(context.Context, *Source) error {
 }
 
 func (r *Resource) Check(context.Context, *Source, *Version) ([]Version, error) {
-    return nil, return errors.New("not implemented")
+    return nil, errors.New("not implemented")
 }
 
 func (r *Resource) In(context.Context, *Source, *Version, string, *GetParams) ([]concourse.Metadata, error) {
-    return nil, return errors.New("not implemented")
+    return nil, errors.New("not implemented")
 }
 
 func (r *Resource) Out(context.Context, *Source, string, *PutParams) (*Version, []concourse.Metadata, error) {
-    return nil, nil, return errors.New("not implemented")
+    return nil, nil, errors.New("not implemented")
 }
 
 // 3. Invoke the Main function provided by this sdk
