@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/cludden/concourse-go-sdk/pkg/archive/settings"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -76,12 +77,12 @@ func TestArchive(t *testing.T) {
 		assert.NoError(t, err)
 	}()
 
-	a, err := New(ctx, cfg)
+	a, err := New(ctx, cfg, &settings.Settings{})
 	if !assert.NoError(t, err) {
 		return
 	}
 
-	history, err := a.History(ctx)
+	history, err := a.History(ctx, nil)
 	assert.NoError(t, err)
 	assert.Len(t, history, 0)
 
@@ -97,17 +98,28 @@ func TestArchive(t *testing.T) {
 		t.FailNow()
 	}
 
-	// retrieve and compare version order
-	versions, err := a.History(ctx)
+	// retrieve and compare version order with latest version, no force history
+	versions, err := a.History(ctx, []byte(`{"id":"baz"}`))
+	assert.NoError(t, err)
+	assert.Len(t, versions, 0)
+
+	// retrieve and compare version order with no latest version
+	versions, err = a.History(ctx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, history, versions)
+
+	// retrieve and compare version order with latest version, no force history
+	a.settings.ForceHistory = true
+	forcedHistory, err := a.History(ctx, []byte(`{"id":"baz"}`))
+	assert.NoError(t, err)
+	assert.Equal(t, history, forcedHistory)
 
 	// close archive
 	err = a.Close(ctx)
 	assert.NoError(t, err)
 
 	// open new archive
-	a, err = New(ctx, cfg)
+	a, err = New(ctx, cfg, &settings.Settings{})
 	assert.NoError(t, err)
 	defer func() {
 		err = a.Close(ctx)
@@ -133,7 +145,7 @@ func TestArchive(t *testing.T) {
 	}
 
 	// retrieve and compare version order
-	versions, err = a.History(ctx)
+	versions, err = a.History(ctx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, [][]byte{
 		[]byte(`{"id":"foo"}`),
