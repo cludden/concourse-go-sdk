@@ -1,8 +1,8 @@
 package sdk
 
 import (
-	"bytes"
 	"context"
+	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -198,19 +198,33 @@ func (action *Action) exec(ctx context.Context, path string, method reflect.Valu
 	// attempt to populate latest version for check operations if no existing version provided
 	// and archive is configured
 	var history [][]byte
-	if action.method == checkAction.method && args[2].IsNil() && archiver != nil {
+	var historyLength int
+	var latest []byte
+	if action.method == checkAction.method && archiver != nil {
 		color.Yellow("fetching archived resource version history...")
-		history, err = archiver.History(ctx)
+
+		hasLatest := !args[2].IsNil()
+		if hasLatest {
+			latest, err = json.Marshal(args[2].Interface())
+			if err != nil {
+				return nil, fmt.Errorf("error fetching archive history: error serializing latest version: %v", err)
+			}
+		}
+
+		history, err = archiver.History(ctx, latest)
 		if err != nil {
 			return nil, fmt.Errorf("error hydrating archived version history: %v", err)
 		}
-		if l := len(history); l > 0 {
+		historyLength = len(history)
+
+		if historyLength > 0 && !hasLatest {
 			color.Yellow("using existing resource version from version history...")
-			arg, err := validateArg(ctx, args[2].Type(), gjson.ParseBytes(history[len(history)-1]), true)
+			historyLatest := history[len(history)-1]
+			arg, err := validateArg(ctx, args[2].Type(), gjson.ParseBytes(historyLatest), true)
 			if err != nil {
 				return nil, fmt.Errorf("error parsing archived version history: %v", err)
 			}
-			args[2] = arg
+			args[2], latest = arg, historyLatest
 		}
 	}
 
@@ -255,33 +269,35 @@ func (action *Action) exec(ctx context.Context, path string, method reflect.Valu
 		// define versions result
 		versions := reflect.MakeSlice(reflect.SliceOf(results[0].Type().Elem()), 0, 0)
 
-		// append any existing history retrieved earlier in the operation
-		for i := 0; i < len(history)-1; i++ {
+		// append any existing history retrieved earlier in the operation to list of versions
+		// keep track of versions seen
+		archived := make(map[string]struct{}, historyLength)
+		for i := 0; i < len(history); i++ {
 			serialized := history[i]
+			sum := md5.Sum(serialized)
 			parsed, err := validateArg(ctx, args[2].Elem().Type(), gjson.ParseBytes(serialized), true)
 			if err != nil {
 				return nil, fmt.Errorf("error parsing archived resource version: %v", err)
 			}
 			versions = reflect.Append(versions, parsed)
+			archived[string(sum[:])] = struct{}{}
 		}
 
 		// define set of unarchived versions
 		var unarchived [][]byte
-		historyCount := len(history)
 
-		// add returned versions to the result
+		// add returned versions to the result if not present in history
 		for i := 0; i < results[0].Len(); i++ {
 			version := results[0].Index(i)
-			versions = reflect.Append(versions, version)
-
-			// if archive is configured, serialize version, and add any new versions to unarchived set
-			if action.method == checkAction.method && archiver != nil {
-				serialized, err := json.Marshal(version.Addr().Interface())
-				if err != nil {
-					return nil, fmt.Errorf("error serializing version for archival: %v", err)
-				}
-
-				if historyCount == 0 || !bytes.Equal(serialized, history[len(history)-1]) {
+			serialized, err := json.Marshal(version.Addr().Interface())
+			if err != nil {
+				return nil, fmt.Errorf("error serializing version for archival: %v", err)
+			}
+			sum := md5.Sum(serialized)
+			if _, seen := archived[string(sum[:])]; !seen {
+				versions = reflect.Append(versions, version)
+				// if archive is configured, serialize version, and add any new versions to unarchived set
+				if action.method == checkAction.method && archiver != nil {
 					unarchived = append(unarchived, serialized)
 				}
 			}

@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/boltdb/bolt"
+	"github.com/cludden/concourse-go-sdk/pkg/archive/settings"
 	"github.com/fatih/color"
 	"github.com/oklog/ulid/v2"
 )
@@ -23,30 +24,43 @@ const (
 )
 
 type (
+	// Config describes the available resource-specific configuration settings
 	Config struct {
-		Bucket      string       `json:"bucket" validate:"required"`
+		// The bucket name where the boltdb database file is persisted in between builds
+		Bucket string `json:"bucket" validate:"required"`
+		// AWS session credentials
 		Credentials *Credentials `json:"credentials,omitempty" validate:"omitempty,dive"`
-		Endpoint    string       `json:"endpoint"`
-		Region      string       `json:"region" validate:"required"`
-		Key         string       `json:"key" validate:"required"`
+		// A custom S3 endpoint, useful for testing
+		Endpoint string `json:"endpoint"`
+		// The AWS region where the bucket was created
+		Region string `json:"region" validate:"required"`
+		// The fully qualified S3 object key used for persisting the database file in
+		// between builds
+		Key string `json:"key" validate:"required"`
 	}
 
+	// Credentials describes AWS session credentials used for authenticating with S3
 	Credentials struct {
-		AccessKey    string `json:"access_key" validate:"required"`
-		SecretKey    string `json:"secret_key" validate:"required"`
+		// The AWS_ACCESS_KEY_ID value to use for authenticating with S3
+		AccessKey string `json:"access_key" validate:"required"`
+		// The AWS_SECRET_ACCESS_KEY value to use for authenticating with S3
+		SecretKey string `json:"secret_key" validate:"required"`
+		// The AWS_SESSION_TOKEN value to use for authenticating with S3
 		SessionToken string `json:"session_token"`
 	}
 )
 
+// Archive implements a resource version archive using BoltDB backed by AWS S3.
 type Archive struct {
-	cfg   *Config
-	db    *bolt.DB
-	s3    *s3.Client
-	stats bolt.BucketStats
+	cfg      *Config
+	db       *bolt.DB
+	s3       *s3.Client
+	settings *settings.Settings
+	stats    bolt.BucketStats
 }
 
-func New(ctx context.Context, cfg Config) (*Archive, error) {
-	a := &Archive{cfg: &cfg}
+func New(ctx context.Context, cfg Config, s *settings.Settings) (*Archive, error) {
+	a := &Archive{cfg: &cfg, settings: s}
 	if err := a.initS3(ctx); err != nil {
 		return nil, err
 	}
@@ -95,9 +109,13 @@ func (a *Archive) Close(ctx context.Context) error {
 	return err
 }
 
-func (a *Archive) History(ctx context.Context) ([][]byte, error) {
-	var history [][]byte
-	err := a.db.View(func(tx *bolt.Tx) error {
+func (a *Archive) History(ctx context.Context, latest []byte) (history [][]byte, err error) {
+	// exit early if concourse has version history
+	if latest != nil && !a.settings.ForceHistory {
+		return nil, nil
+	}
+
+	err = a.db.View(func(tx *bolt.Tx) error {
 		versions := tx.Bucket([]byte(versionsBucket))
 		if versions == nil {
 			return fmt.Errorf("database missing %s bucket", versionsBucket)
@@ -126,12 +144,12 @@ func (a *Archive) Put(ctx context.Context, next ...[]byte) error {
 		for _, version := range next {
 			sum := sha1.Sum(version)
 			if value := index.Get(sum[:]); value == nil {
-				if err := index.Put(sum[:], []byte{}); err != nil {
+				id := ulid.Make().Bytes()
+				if err := index.Put(sum[:], id); err != nil {
 					return fmt.Errorf("error updating index: %v", err)
 				}
 
-				id := ulid.Make()
-				if err := versions.Put(id.Bytes(), version); err != nil {
+				if err := versions.Put(id, version); err != nil {
 					return fmt.Errorf("error updating versions: %v", err)
 				}
 			}

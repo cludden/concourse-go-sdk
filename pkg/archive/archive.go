@@ -6,17 +6,19 @@ import (
 
 	"github.com/cludden/concourse-go-sdk/pkg/archive/boltdb"
 	"github.com/cludden/concourse-go-sdk/pkg/archive/inmem"
+	"github.com/cludden/concourse-go-sdk/pkg/archive/settings"
 	"github.com/go-playground/validator/v10"
 )
 
 type Config struct {
-	BoltDB *boltdb.Config `json:"boltdb" validate:"omitempty"`
-	Inmem  *inmem.Config  `json:"inmem" validate:"omitempty"`
+	settings.Settings `json:",inline" validate:"dive"`
+	BoltDB            *boltdb.Config `json:"boltdb" validate:"omitempty"`
+	Inmem             *inmem.Config  `json:"inmem" validate:"omitempty"`
 }
 
 type Archive interface {
 	Close(ctx context.Context) error
-	History(ctx context.Context) ([][]byte, error)
+	History(ctx context.Context, latest []byte) ([][]byte, error)
 	Put(ctx context.Context, versions ...[]byte) error
 }
 
@@ -27,9 +29,9 @@ func New(ctx context.Context, cfg Config) (Archive, error) {
 
 	switch {
 	case cfg.BoltDB != nil:
-		return boltdb.New(ctx, *cfg.BoltDB)
+		return boltdb.New(ctx, *cfg.BoltDB, &cfg.Settings)
 	case cfg.Inmem != nil:
-		return inmem.New(ctx, *cfg.Inmem)
+		return inmem.New(ctx, *cfg.Inmem, &cfg.Settings)
 	default:
 		return nil, fmt.Errorf("no valid provider config found")
 	}

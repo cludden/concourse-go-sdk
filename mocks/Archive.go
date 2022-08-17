@@ -27,13 +27,13 @@ func (_m *Archive) Close(ctx context.Context) error {
 	return r0
 }
 
-// History provides a mock function with given fields: ctx
-func (_m *Archive) History(ctx context.Context) ([][]byte, error) {
-	ret := _m.Called(ctx)
+// History provides a mock function with given fields: ctx, latest
+func (_m *Archive) History(ctx context.Context, latest []byte) ([][]byte, error) {
+	ret := _m.Called(ctx, latest)
 
 	var r0 [][]byte
-	if rf, ok := ret.Get(0).(func(context.Context) [][]byte); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, []byte) [][]byte); ok {
+		r0 = rf(ctx, latest)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([][]byte)
@@ -41,8 +41,8 @@ func (_m *Archive) History(ctx context.Context) ([][]byte, error) {
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, []byte) error); ok {
+		r1 = rf(ctx, latest)
 	} else {
 		r1 = ret.Error(1)
 	}

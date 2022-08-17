@@ -251,7 +251,7 @@ func TestCheck(t *testing.T) {
 				return []testVersion{{ID: "abcdef"}}, nil
 			},
 			assert: func(t *testing.T, a archive.Archive, result any) {
-				history, err := a.History(context.Background())
+				history, err := a.History(context.Background(), nil)
 				assert.NoError(t, err)
 				assert.Len(t, history, 1)
 				assert.Equal(t, "abcdef", gjson.ParseBytes(history[0]).Get("id").String())
@@ -276,7 +276,7 @@ func TestCheck(t *testing.T) {
 				assert.Equal(t, "2", versions.Index(1).Interface().(testVersion).ID)
 				assert.Equal(t, "3", versions.Index(2).Interface().(testVersion).ID)
 
-				history, err := a.History(context.Background())
+				history, err := a.History(context.Background(), nil)
 				assert.NoError(t, err)
 				assert.Len(t, history, 3)
 				assert.Equal(t, "1", gjson.ParseBytes(history[0]).Get("id").String())
@@ -292,6 +292,7 @@ func TestCheck(t *testing.T) {
 						return assert.Equal(t, id, gjson.ParseBytes(version).Get("id").String())
 					})
 				}
+				m.On("History", mock.Anything, mock.Anything).Return(nil, nil)
 				m.On("Put", mock.Anything, matchVersion("123456"), matchVersion("4")).Return(nil)
 				return m
 			},
@@ -336,7 +337,7 @@ func TestCheck(t *testing.T) {
 				assert.Equal(t, "3", versions.Index(2).Interface().(testVersion).ID)
 				assert.Equal(t, "4", versions.Index(3).Interface().(testVersion).ID)
 
-				history, err := a.History(context.Background())
+				history, err := a.History(context.Background(), nil)
 				assert.NoError(t, err)
 				assert.Len(t, history, 4)
 				assert.Equal(t, "1", gjson.ParseBytes(history[0]).Get("id").String())
@@ -373,7 +374,7 @@ func TestCheck(t *testing.T) {
 				assert.Equal(t, "4", versions.Index(3).Interface().(testVersion).ID)
 				assert.Equal(t, "5", versions.Index(4).Interface().(testVersion).ID)
 
-				history, err := a.History(context.Background())
+				history, err := a.History(context.Background(), nil)
 				assert.NoError(t, err)
 				assert.Len(t, history, 5)
 				assert.Equal(t, "1", gjson.ParseBytes(history[0]).Get("id").String())
@@ -624,7 +625,7 @@ func TestOut(t *testing.T) {
 				return a
 			},
 			assert: func(t *testing.T, a archive.Archive, result any) {
-				history, err := a.History(context.Background())
+				history, err := a.History(context.Background(), nil)
 				assert.NoError(t, err)
 				assert.Len(t, history, 1)
 				assert.Equal(t, "123456", gjson.ParseBytes(history[0]).Get("id").String())

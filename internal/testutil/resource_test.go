@@ -28,7 +28,7 @@ func TestExec(t *testing.T) {
 				r.On("Archive", mock.Anything, mock.Anything).Return(
 					func(ctx context.Context, s *Source) archive.Archive {
 						a := mocks.NewArchive(t)
-						a.On("History", mock.Anything).Return(
+						a.On("History", mock.Anything, mock.Anything).Return(
 							[][]byte{
 								[]byte(`{"qux":"1"}`),
 							},
