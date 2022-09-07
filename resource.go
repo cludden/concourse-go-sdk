@@ -149,8 +149,8 @@ func Exec(ctx context.Context, op operation, provider any, stdin io.Reader, stdo
 
 	req := gjson.ParseBytes(payload)
 
-	if init := resource.MethodByName("Initialize"); init.IsValid() {
-		if _, err := initAction.Exec(ctx, "", init, req); err != nil {
+	if resource.MethodByName("Initialize").IsValid() {
+		if _, err := initAction.Exec(ctx, "", resource, req); err != nil {
 			return fmt.Errorf("error initializing resource: %v", err)
 		}
 	}

@@ -199,10 +199,10 @@ func (action *Action) exec(ctx context.Context, path string, method reflect.Valu
 	// and archive is configured
 	var history [][]byte
 	var historyLength int
-	var latest []byte
 	if action.method == checkAction.method && archiver != nil {
 		color.Yellow("fetching archived resource version history...")
 
+		var latest []byte
 		hasLatest := !args[2].IsNil()
 		if hasLatest {
 			latest, err = json.Marshal(args[2].Interface())
@@ -224,7 +224,7 @@ func (action *Action) exec(ctx context.Context, path string, method reflect.Valu
 			if err != nil {
 				return nil, fmt.Errorf("error parsing archived version history: %v", err)
 			}
-			args[2], latest = arg, historyLatest
+			args[2] = arg
 		}
 	}
 
