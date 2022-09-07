@@ -192,7 +192,7 @@ type Source struct {
     Archive *archive.Config `json:"archive"`
 }
 
-func (r *Resource) Archive(ctx context.Context, source *Source) (archive.Archive, error) {
+func (r *Resource) Archive(ctx context.Context, s *Source) (archive.Archive, error) {
     if s != nil && s.Archive != nil {
         return archive.New(ctx, *s.Archive)
     }
@@ -201,7 +201,7 @@ func (r *Resource) Archive(ctx context.Context, source *Source) (archive.Archive
 ```
 
 ### `boltdb`
-an archive implementation that utilizes [boltdb] backed by [AWS S3].
+an archive implementation that utilizes [boltdb](https://pkg.go.dev/github.com/boltdb/bolt) backed by [AWS S3](https://aws.amazon.com/s3/).
 
 ## License
 Licensed under the [MIT License](LICENSE.md)  
