@@ -25,27 +25,11 @@ type (
 	}
 )
 
-type Archivable interface {
-	Archive(context.Context, *Source) (archive.Archive, error)
-}
-
 type Resource interface {
 	Check(context.Context, *Source, *Version) ([]Version, error)
-	In(context.Context, *Source, *Version, string, *GetParams) (*Version, []sdk.Metadata, error)
-	Out(context.Context, *Source, string, *PutParams) (*Version, []sdk.Metadata, error)
-}
-
-type ResourceInit interface {
-	Resource
+	Close(context.Context) error
+	In(context.Context, *Source, *Version, string, *GetParams) ([]sdk.Metadata, error)
+	Out(context.Context, *Source, string, *PutParams) (Version, []sdk.Metadata, error)
+	Archive(context.Context, *Source) (sdk.Archive, error)
 	Initialize(context.Context, *Source) error
-}
-
-type ResourceArchive interface {
-	Resource
-	Archivable
-}
-
-type ResourceInitArchive interface {
-	ResourceInit
-	Archivable
 }
