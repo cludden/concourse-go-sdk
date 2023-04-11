@@ -4,21 +4,21 @@ import (
 	"context"
 	"fmt"
 
-	concourse "github.com/cludden/concourse-go-sdk"
+	sdk "github.com/cludden/concourse-go-sdk"
 )
 
 func main() {
-	concourse.Main(&Resource{})
+	sdk.Main[Source, Version, GetParams, PutParams](&Resource{})
 }
 
 // =============================================================================
 
 type (
-	InParams struct {
+	GetParams struct {
 		Shallow bool `json:"shallow"`
 	}
 
-	OutParams struct {
+	PutParams struct {
 		Force bool `json:"bool"`
 	}
 
@@ -49,7 +49,9 @@ func (v *Version) Validate(context.Context) error {
 
 // =============================================================================
 
-type Resource struct{}
+type Resource struct {
+	sdk.BaseResource[Source, Version, GetParams, PutParams]
+}
 
 func (r *Resource) Initialize(ctx context.Context, source *Source) (err error) {
 	return nil
@@ -62,10 +64,10 @@ func (r *Resource) Check(ctx context.Context, source *Source, v *Version) ([]Ver
 	return []Version{*v}, nil
 }
 
-func (r *Resource) In(ctx context.Context, source *Source, v *Version, path string, p *InParams) (*Version, []concourse.Metadata, error) {
-	return &Version{Ref: "foo"}, []concourse.Metadata{{Name: "bar", Value: "baz"}}, nil
+func (r *Resource) In(ctx context.Context, source *Source, v *Version, path string, p *GetParams) ([]sdk.Metadata, error) {
+	return []sdk.Metadata{{Name: "bar", Value: "baz"}}, nil
 }
 
-func (r *Resource) Out(ctx context.Context, source *Source, path string, p *OutParams) (*Version, []concourse.Metadata, error) {
-	return &Version{Ref: "foo"}, []concourse.Metadata{{Name: "bar", Value: "baz"}}, nil
+func (r *Resource) Out(ctx context.Context, source *Source, path string, p *PutParams) (Version, []sdk.Metadata, error) {
+	return Version{Ref: "foo"}, []sdk.Metadata{{Name: "bar", Value: "baz"}}, nil
 }
