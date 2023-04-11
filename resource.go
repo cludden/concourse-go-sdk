@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
 
 	"github.com/fatih/color"
 	"github.com/hashicorp/go-multierror"
-	"github.com/oklog/run"
 	"github.com/tidwall/gjson"
 )
 
@@ -94,20 +94,10 @@ func Main[Source any, Version any, GetParams any, PutParams any](r Resource[Sour
 		op = invalidOp
 	}
 
-	g := &run.Group{}
-	g.Add(run.SignalHandler(context.Background(), os.Interrupt, os.Kill))
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
+	defer cancel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	g.Add(
-		func() error {
-			return Exec(ctx, op, r, os.Stdin, os.Stdout, os.Stderr, os.Args)
-		},
-		func(error) {
-			cancel()
-		},
-	)
-
-	if err := g.Run(); err != nil {
+	if err := Exec(ctx, op, r, os.Stdin, os.Stdout, os.Stderr, os.Args); err != nil {
 		color.New(color.FgRed).Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -206,7 +196,7 @@ func Exec[Source any, Version any, GetParams any, PutParams any](
 		}
 	}()
 
-	// initilaize archive
+	// initialize archive
 	var archiver Archive
 	if op == CheckOp || op == OutOp {
 		archiver, err = r.Archive(ctx, source)

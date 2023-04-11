@@ -10,7 +10,6 @@ require (
 	github.com/fatih/color v1.13.0
 	github.com/go-playground/validator/v10 v10.11.0
 	github.com/hashicorp/go-multierror v1.1.1
-	github.com/oklog/run v1.1.0
 	github.com/oklog/ulid/v2 v2.1.0
 	github.com/stretchr/testify v1.7.0
 	github.com/tidwall/gjson v1.14.1
