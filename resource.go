@@ -128,6 +128,9 @@ func Exec[Source any, Version any, GetParams any, PutParams any](
 			return fmt.Errorf("invalid operation: path argument required")
 		}
 		path = args[1]
+		if err := os.Chdir(path); err != nil {
+			return fmt.Errorf("error changing to build working directory: %w", err)
+		}
 	}
 
 	// parse input payload

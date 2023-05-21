@@ -55,8 +55,8 @@ func (r *Resource) In(ctx context.Context, s *Source, v *Version, dir string, p 
 }
 
 // Out creates a new version
-func (r *Resource) Out(ctx context.Context, s *Source, dir string, p *PutParams) (*Version, []sdk.Metadata, error) {
-	return nil, nil, errors.New("not implemented")
+func (r *Resource) Out(ctx context.Context, s *Source, dir string, p *PutParams) (Version, []sdk.Metadata, error) {
+	return Version{}, nil, errors.New("not implemented")
 }
 ```
 
