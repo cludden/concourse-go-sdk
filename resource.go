@@ -58,7 +58,7 @@ type (
 
 	// Reponse describes a in/out response payload
 	Response[Version any] struct {
-		Version  Version    `json:"version"`
+		Version  *Version   `json:"version"`
 		Metadata []Metadata `json:"metadata"`
 	}
 
@@ -359,21 +359,21 @@ func in[S any, V any, G any, P any](ctx context.Context, r Resource[S, V, G, P],
 		return nil, err
 	}
 	return &Response[V]{
-		Version:  *version,
+		Version:  version,
 		Metadata: meta,
 	}, nil
 }
 
 // out executes an Out operation on the provided resource
 func out[S any, V any, G any, P any](ctx context.Context, r Resource[S, V, G, P], archiver Archive, source *S, path string, putParams gjson.Result) (*Response[V], error) {
-	errs := multierror.Append(nil)
+	var errs error
 
 	// parse params
 	var params *P
 	if putParams.Exists() && putParams.Type != gjson.Null {
 		var p P
 		if err := json.Unmarshal([]byte(putParams.Raw), &p); err != nil {
-			errs = multierror.Append(errs, fmt.Errorf("error parsing get parameters: %w", err))
+			errs = errors.Join(errs, fmt.Errorf("error parsing get parameters: %w", err))
 		} else {
 			params = &p
 		}
@@ -383,13 +383,13 @@ func out[S any, V any, G any, P any](ctx context.Context, r Resource[S, V, G, P]
 	if params != nil {
 		if v, ok := interface{}(params).(Validatable); ok {
 			if err := v.Validate(ctx); err != nil {
-				errs = multierror.Append(errs, fmt.Errorf("invalid get parameters: %w", err))
+				errs = errors.Join(errs, fmt.Errorf("invalid get parameters: %w", err))
 			}
 		}
 	}
 
-	if errs.Len() > 0 {
-		return nil, errs.ErrorOrNil()
+	if errs != nil {
+		return nil, errs
 	}
 
 	// execute In
@@ -398,10 +398,29 @@ func out[S any, V any, G any, P any](ctx context.Context, r Resource[S, V, G, P]
 		return nil, err
 	}
 
+	// validate returned version
+	serialized, err := json.Marshal(&version)
+	if err != nil {
+		return nil, fmt.Errorf("error serializing version as json: %w", err)
+	}
+	c := gjson.ParseBytes(serialized)
+	if !c.IsObject() {
+		return nil, fmt.Errorf("invalid version: expected object, got: %s", c.Type.String())
+	}
+	c.ForEach(func(key, val gjson.Result) bool {
+		if key.Type != gjson.String && val.Type != gjson.String {
+			errs = errors.Join(errs, fmt.Errorf("invalid key value pair: both must be string, got: %s, %s", key.Type.String(), val.Type.String()))
+		}
+		return true
+	})
+	if errs != nil {
+		return nil, fmt.Errorf("invalid version: %w", errs)
+	}
+
 	// archive new versions emitted by out operations
 	if archiver != nil {
 		color.Yellow("archiving new version...")
-		serialized, err := json.Marshal(version)
+
 		if err != nil {
 			return nil, fmt.Errorf("error serializing version for archival: %v", err)
 		}
@@ -412,7 +431,7 @@ func out[S any, V any, G any, P any](ctx context.Context, r Resource[S, V, G, P]
 	}
 
 	return &Response[V]{
-		Version:  version,
+		Version:  &version,
 		Metadata: meta,
 	}, nil
 }

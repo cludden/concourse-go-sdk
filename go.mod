@@ -1,6 +1,6 @@
 module github.com/cludden/concourse-go-sdk
 
-go 1.19
+go 1.20
 
 require (
 	github.com/aws/aws-sdk-go-v2/config v1.15.17
